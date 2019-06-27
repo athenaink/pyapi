@@ -15,12 +15,19 @@ app.config['PORT'] = int(os.environ['KDD_PORT']) if 'KDD_PORT' in os.environ els
 def hello():
     return "Hello World!"
 
-@app.route("/piq_repeat", methods=["GET"])
+@app.route("/piq_repeat", methods=["POST", "GET"])
 def piq_repeat():
-    args = request.args
-    url = args["url"]
-    piq = PIQBuilder.build()
-    return piq.queryRepeat(url)
+    if request.method=='POST':
+        form = request.json
+        url = form["url"]
+        piq = PIQBuilder.build()
+        return piq.queryRepeat(url)
+    elif request.method=='GET':
+        args = request.args
+        url = args["url"]
+        piq = PIQBuilder.build()
+        return piq.queryRepeat(url)
+    return jsonify(errorcode=404)
 
 @app.route("/piq_repeat_case", methods=["POST", "GET"])
 def piq_repeat_case():

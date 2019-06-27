@@ -111,7 +111,7 @@ class DelDbCommand(DbCommand):
     def execute(self):
         # 根据图片hash从数据库里查询相同hash的图片指纹
         # sql = 'delete from case_art_image_distinct where cid="{}" and id="{}"'.format(self.cid, self.id)
-        sql = 'update case_art_image_distinct set delete_time="{}" where cid="{}" and id="{}"'.format(int(time()), self.cid, self.id)
+        sql = 'update case_art_image_distinct set delete_time="{}" where cid="{}" and `id` in ({})'.format(int(time()), self.cid, self.id)
         return self.db.write(sql)
 
 class AddDbCommand(DbCommand):
