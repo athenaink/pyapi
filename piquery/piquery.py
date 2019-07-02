@@ -4,7 +4,7 @@ from piquery.piqimg import ImgDownloader, ImgTransformer, ImgFeature
 from piquery.piqdb import MysqlDb
 from piquery.piqlog import PiqLog
 from time import time
-from config.piq_db import config as db_cfg
+from piquery.piq_config import config as db_cfg
 
 class Response:
     @staticmethod
@@ -26,7 +26,7 @@ class FullHashQueryStrategy(HashQueryStrategy):
         super().__init__(*args, **kwargs)
     def query(self, _hash):
         # 根据图片hash从数据库里查询相同hash的图片指纹
-        sql = 'select * from case_art_image_distinct where hash = "{}" and delete_time is null'.format(_hash)
+        sql = 'select * from {} where hash = "{}" and delete_time is null'.format(db_cfg['table'], _hash)
         return self.db.read_sql(sql)
 
 class LimitHashQueryStrategy(HashQueryStrategy):
@@ -35,7 +35,7 @@ class LimitHashQueryStrategy(HashQueryStrategy):
         self.limit = limit
     def query(self, _hash):
         # 根据图片hash从数据库里查询相同hash的图片指纹
-        sql = 'select * from case_art_image_distinct where hash = "{}" and delete_time is null limit {}'.format(_hash, self.limit)
+        sql = 'select * from {} where hash = "{}" and delete_time is null limit {}'.format(db_cfg['table'], _hash, self.limit)
         return self.db.read_sql(sql)
 
 class CaseHashQueryStrategy(HashQueryStrategy):
@@ -44,7 +44,7 @@ class CaseHashQueryStrategy(HashQueryStrategy):
         self.case_ids = case_ids
     def query(self, _hash):
         # 根据图片hash从数据库里查询相同hash的图片指纹
-        sql = 'select * from case_art_image_distinct where cid in ({}) and hash = "{}" and delete_time is null'.format(self.case_ids, _hash)
+        sql = 'select * from {} where cid in ({}) and hash = "{}" and delete_time is null'.format(db_cfg['table'], self.case_ids, _hash)
         return self.db.read_sql(sql)
 
 class PIQuery:
@@ -108,10 +108,14 @@ class DelDbCommand(DbCommand):
         super().__init__(*args, **kwargs)
         self.cid = cid
         self.id = _id
+    def _exist(self):
+        return bool(self.db.read('select * from {} where `cid`="{}" and `id`="{}"'.format(db_cfg['table'], self.cid, self.id)))
     def execute(self):
+        if not self._exist():
+            return True
         # 根据图片hash从数据库里查询相同hash的图片指纹
         # sql = 'delete from case_art_image_distinct where cid="{}" and id="{}"'.format(self.cid, self.id)
-        sql = 'update case_art_image_distinct set delete_time="{}" where cid="{}" and `id` in ({})'.format(int(time()), self.cid, self.id)
+        sql = 'update {} set delete_time="{}" where cid="{}" and `id` in ({})'.format(db_cfg['table'], int(time()), self.cid, self.id)
         return self.db.write(sql)
 
 class AddDbCommand(DbCommand):
@@ -121,14 +125,22 @@ class AddDbCommand(DbCommand):
         self.id = _id
         self.url = url
         self.img_feature = ImgFeature()
+    def _exist(self):
+        return bool(self.db.read('select * from {} where `cid`="{}" and `id`="{}"'.format(db_cfg['table'], self.cid, self.id)))
+    def _cancel_del(self):
+        sql = 'update {} set delete_time=NULL where cid="{}" and `id`="{}"'.format(db_cfg['table'], self.cid, self.id)
+        self.db.write(sql)
     def execute(self):
+        if self._exist():
+            self._cancel_del()
+            return True
         img_rgb = ImgDownloader.download_numpy(self.url)
         img_gray = ImgTransformer.bgr2gray(ImgTransformer.rgb2bgr(img_rgb))
         img_hash = self.img_feature.gray2hash(img_gray)
         img_des = self.img_feature.gray2des(img_gray)
         img_fp = self.img_feature.des2fp(img_des)
         # 根据图片hash从数据库里查询相同hash的图片指纹
-        sql = 'insert into case_art_image_distinct (`cid`, `id`, `hash`, `fp`, `filename`) values ("{}", "{}", "{}", "{}", "{}")'.format(self.cid, self.id, img_hash, img_fp, self.url)
+        sql = 'insert into {} (`cid`, `id`, `hash`, `fp`, `filename`) values ("{}", "{}", "{}", "{}", "{}")'.format(db_cfg['table'], self.cid, self.id, img_hash, img_fp, self.url)
         return self.db.write(sql)
 
 class PIQBuilder:

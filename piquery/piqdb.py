@@ -46,13 +46,20 @@ class Db(metaclass = ABCMeta):
     def write(self):
         pass
     @abstractmethod
+    def read(self):
+        pass
+    @abstractmethod
+    def read_all(self):
+        pass
+    @abstractmethod
     def read_sql(self):
         pass
 
 class MysqlDb(Db):
     cursor = None
     def __init__(self, *args, **kwargs):
-        self.connection = Mysql(*args, **kwargs)()
+        self.db = Mysql(*args, **kwargs)
+        self.connection = self.db()
     def write(self, sql):
         if self.cursor is None:
             self.cursor = self.connection.cursor()
@@ -64,5 +71,9 @@ class MysqlDb(Db):
             self.connection.rollback()
             return False
         return True
+    def read(self, sql):
+        return self.db.fetchone(sql)
+    def read_all(self, sql):
+        return self.db.fetchall(sql)
     def read_sql(self, sql):
         return pd.read_sql(sql, self.connection)
