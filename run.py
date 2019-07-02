@@ -5,7 +5,7 @@
 from flask import Flask, request, jsonify
 import os
 from piquery.piquery import PIQBuilder
-from piquery.piquery import Response
+from piquery.piq_error import DownloadError, ImageFormatError
 
 app = Flask(__name__)
 basedir = os.path.abspath(os.path.dirname(__file__))
@@ -50,7 +50,12 @@ def piq_add():
         url = form['url']
 
         cmd = PIQBuilder.buildAddCmd(cid, _id, url)
-        cmd.execute()
+        try:
+            cmd.execute()
+        except DownloadError as err:
+            return jsonify(errorcode=501, errormsg=repr(err))
+        except ImageFormatError as err:
+            return jsonify(errorcode=502, errormsg=repr(err))
         return jsonify(errorcode=0, errormsg='ok')
     return jsonify(errorcode=404)
 

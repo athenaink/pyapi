@@ -6,6 +6,7 @@ import cv2 as cv
 
 from piquery.piq_feature import ImFeature, CropImFeature, ResizeImFeature, ImSim
 from piquery.piq_hash import imhash_dct
+from piquery.piq_error import DownloadError, ImageFormatError
 
 class ImgDownloader:
     @staticmethod
@@ -13,11 +14,20 @@ class ImgDownloader:
         headers = headers = { 'user-agent':
                              'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/74.0.3729.157 Safari/537.36' }
 
-        return requests.get(url, timeout=3.0, headers=headers)
+        try:
+            res = requests.get(url, timeout=3.0, headers=headers)
+        except:
+            raise DownloadError('image downloading timeout!')
+        if res.status_code != 200:
+            raise DownloadError("image doesn't exist!")
+        return res
 
     @staticmethod
     def download_numpy(url):
         res = ImgDownloader.download(url)
+        img_data = np.asarray(Image.open(BytesIO(res.content)))
+        if len(img_data.shape) < 3:
+            raise ImageFormatError("image format not supported!")
         return np.asarray(Image.open(BytesIO(res.content)))
 
 class ImgTransformer:

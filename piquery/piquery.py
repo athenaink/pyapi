@@ -5,11 +5,12 @@ from piquery.piqdb import MysqlDb
 from piquery.piqlog import PiqLog
 from time import time
 from piquery.piq_config import config as db_cfg
+from piquery.piq_error import DownloadError, ImageFormatError
 
 class Response:
     @staticmethod
     def json(errorcode=0, errormsg='ok', **kwargs):
-        rs = dict(errorcode=0, errormsg='ok')
+        rs = dict(errorcode=errorcode, errormsg=errormsg)
         for k, v in kwargs.items():
             rs[k] = v
         return json.dumps(rs)
@@ -89,6 +90,10 @@ class PIQuery:
                     break
             sim_time = time() - start_time
             # print('sim_time : {}'.format(sim_time))
+        except DownloadError as err:
+            return Response.json(errorcode=501, errormsg=repr(err))
+        except ImageFormatError as err:
+            return Response.json(errorcode=502, errormsg=repr(err))
         except:
             return Response.json(errorcode=500, errormsg='server inner exception!')
         self.log.write(url, img_hash, len(hash_df), download_time, db_time, sim_time, time() - start_time_, 1 if repeat else 0, repeat_confidence, sim_cid, sim_id)
@@ -134,7 +139,9 @@ class AddDbCommand(DbCommand):
         if self._exist():
             self._cancel_del()
             return True
+
         img_rgb = ImgDownloader.download_numpy(self.url)
+
         img_gray = ImgTransformer.bgr2gray(ImgTransformer.rgb2bgr(img_rgb))
         img_hash = self.img_feature.gray2hash(img_gray)
         img_des = self.img_feature.gray2des(img_gray)
