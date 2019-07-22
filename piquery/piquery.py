@@ -6,6 +6,19 @@ from piquery.piqlog import PiqLog
 from time import time
 from piquery.piq_config import config as db_cfg
 from piquery.piq_error import DownloadError, ImageFormatError
+from piquery.piq_cache import saveCache, loadCache, RedisCache
+from os import path
+import hashlib
+
+def md5(s):
+    if isinstance(s, str):
+        return hashlib.md5(s.encode(encoding='utf-8')).hexdigest()
+    else:
+        try:
+            s = str(s)
+        except:
+            return None
+        return hashlib.md5(s.encode(encoding='utf-8')).hexdigest()
 
 class Response:
     @staticmethod
@@ -27,7 +40,7 @@ class FullHashQueryStrategy(HashQueryStrategy):
         super().__init__(*args, **kwargs)
     def query(self, _hash):
         # 根据图片hash从数据库里查询相同hash的图片指纹
-        sql = 'select * from {} where hash = "{}" and delete_time is null'.format(db_cfg['table'], _hash)
+        sql = 'select * from {} where hash = "{}"'.format(db_cfg['table'], _hash)
         return self.db.read_sql(sql)
 
 class LimitHashQueryStrategy(HashQueryStrategy):
@@ -36,7 +49,7 @@ class LimitHashQueryStrategy(HashQueryStrategy):
         self.limit = limit
     def query(self, _hash):
         # 根据图片hash从数据库里查询相同hash的图片指纹
-        sql = 'select * from {} where hash = "{}" and delete_time is null limit {}'.format(db_cfg['table'], _hash, self.limit)
+        sql = 'select * from {} where hash = "{}" limit {}'.format(db_cfg['table'], _hash, self.limit)
         return self.db.read_sql(sql)
 
 class CaseHashQueryStrategy(HashQueryStrategy):
@@ -45,16 +58,80 @@ class CaseHashQueryStrategy(HashQueryStrategy):
         self.case_ids = case_ids
     def query(self, _hash):
         # 根据图片hash从数据库里查询相同hash的图片指纹
-        sql = 'select * from {} where cid in ({}) and hash = "{}" and delete_time is null'.format(db_cfg['table'], self.case_ids, _hash)
+        sql = 'select * from {} where cid in ({}) and hash = "{}"'.format(db_cfg['table'], self.case_ids, _hash)
         return self.db.read_sql(sql)
+
+class PIQueryProxy:
+    def __init__(self, piq):
+        self.piq = piq
+        self.cache = RedisCache()
+    def saveCacheRecordToDb(self, md, _hash, repeat, sim, cid, aid):
+        sql = 'insert into {} (`md`, `hash`, `repeat`, `sim`, `cid`, `aid`) values ("{}", "{}", "{}", "{}", "{}", "{}")'.format(db_cfg['table_cache'], md, _hash, repeat, sim, cid, aid)
+        return self.piq.hash_query.db.write(sql)
+    def preprocHash(self, img_hash):
+        piq = self.piq
+        try:
+            if not path.isdir(db_cfg['cache_dir'] + img_hash):
+                hash_df = piq.hash_query.query(img_hash)
+                saveCache(img_hash, hash_df, lambda x:piq.img_feature.fp2des(x))
+        except:
+            return Response.json(errorcode=500, errormsg='server inner exception!')
+        return Response.json()
+    def queryRepeat(self, url):
+        piq = self.piq
+        try:
+            img_hash, img_des = piq.getHashAndDes(url)
+            img_fp = piq.img_feature.des2fp(img_des)
+            cache_key = md5(img_fp)
+            cache_val = self.cache.get(cache_key)
+            if cache_val is not None:
+                sim_cid, sim_id, repeat_confidence = cache_val.split('_')
+                return Response.json(repeat=True, repeat_confidence=float(repeat_confidence), cid=int(sim_cid), id=int(sim_id))
+
+            if not path.isdir(db_cfg['cache_dir'] + img_hash):
+                hash_df = piq.hash_query.query(img_hash)
+                saveCache(img_hash, hash_df, lambda x:piq.img_feature.fp2des(x))
+
+            repeat, repeat_confidence, sim_cid, sim_id = piq.quickQueryRepeat(img_hash, img_des)
+        except DownloadError as err:
+            return Response.json(errorcode=501, errormsg=repr(err))
+        except ImageFormatError as err:
+            return Response.json(errorcode=502, errormsg=repr(err))
+        except:
+            return Response.json(errorcode=500, errormsg='server inner exception!')
+
+        if repeat:
+            self.cache.write(cache_key, "{}_{}_{}".format(sim_cid, sim_id, repeat_confidence))
+            self.saveCacheRecordToDb(cache_key, img_hash, 1, repeat_confidence, sim_cid, sim_id)
+            return Response.json(repeat=repeat, repeat_confidence=repeat_confidence, cid=int(sim_cid), id=int(sim_id))
+        return Response.json(repeat=False)
 
 class PIQuery:
     def __init__(self, hash_query, img_feature):
         self.hash_query = hash_query
         self.img_feature = img_feature
         self.log = PiqLog()
-    def querySim(self, url):
-        pass
+    def getHashAndDes(self, url):
+        img_rgb = ImgDownloader.download_numpy(url)
+        img_gray = ImgTransformer.bgr2gray(ImgTransformer.rgb2bgr(img_rgb))
+        img_hash = self.img_feature.gray2hash(img_gray)
+        img_des = self.img_feature.gray2des(img_gray)
+        return img_hash, img_des
+    def quickQueryRepeat(self, img_hash, img_des):
+        repeat = False
+        repeat_confidence = 0.0
+        sim_cid = 0
+        sim_id = 0
+        desLoader = loadCache(img_hash)
+        for (cid, _id), des in desLoader:
+            sim = self.img_feature.sim(img_des, des)
+            if sim > 0.01:
+                repeat = True
+                repeat_confidence = sim
+                sim_cid = cid
+                sim_id = _id
+                break
+        return repeat, repeat_confidence, sim_cid, sim_id
     def queryRepeat(self, url):
         try:
             start_time = time()
@@ -114,13 +191,13 @@ class DelDbCommand(DbCommand):
         self.cid = cid
         self.id = _id
     def _exist(self):
-        return bool(self.db.read('select * from {} where `cid`="{}" and `id`="{}"'.format(db_cfg['table'], self.cid, self.id)))
+        return bool(self.db.read('select * from {} where `cid`="{}" and `id` in ({})'.format(db_cfg['table'], self.cid, self.id)))
     def execute(self):
         if not self._exist():
             return True
         # 根据图片hash从数据库里查询相同hash的图片指纹
-        # sql = 'delete from case_art_image_distinct where cid="{}" and id="{}"'.format(self.cid, self.id)
-        sql = 'update {} set delete_time="{}" where cid="{}" and `id` in ({})'.format(db_cfg['table'], int(time()), self.cid, self.id)
+        sql = 'delete from {} where cid="{}" and `id` in ({})'.format(db_cfg['table'], self.cid, self.id)
+        # sql = 'update {} set delete_time="{}" where `cid`="{}" and `id` in ({})'.format(db_cfg['table'], int(time()), self.cid, self.id)
         return self.db.write(sql)
 
 class AddDbCommand(DbCommand):
@@ -159,7 +236,7 @@ class PIQBuilder:
 
         img_feature = ImgFeature()
 
-        return PIQuery(limit_hash_query, img_feature)
+        return PIQueryProxy(PIQuery(limit_hash_query, img_feature))
     @staticmethod
     def buildCase(case_ids):
         # print('connect to host {}'.format(db_cfg['host']))
