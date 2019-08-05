@@ -1,5 +1,4 @@
 from abc import ABCMeta, abstractmethod
-import json
 from piquery.piqimg import ImgDownloader, ImgTransformer, ImgFeature
 from piquery.piqdb import MysqlDb
 from piquery.piqlog import PiqLog
@@ -7,8 +6,10 @@ from time import time
 from piquery.piq_config import config as db_cfg
 from piquery.piq_error import DownloadError, ImageFormatError
 from piquery.piq_cache import saveCache, loadCache, RedisCache
+from piquery.piq_hash64_query import PIQueryHash64, AddHashCommand, DelHashCommand
 from os import path
 import hashlib
+from piquery.piq_response import Response
 
 def md5(s):
     if isinstance(s, str):
@@ -19,14 +20,6 @@ def md5(s):
         except:
             return None
         return hashlib.md5(s.encode(encoding='utf-8')).hexdigest()
-
-class Response:
-    @staticmethod
-    def json(errorcode=0, errormsg='ok', **kwargs):
-        rs = dict(errorcode=errorcode, errormsg=errormsg)
-        for k, v in kwargs.items():
-            rs[k] = v
-        return json.dumps(rs)
 
 class HashQueryStrategy(metaclass = ABCMeta):
     def __init__(self, db):
@@ -229,6 +222,11 @@ class AddDbCommand(DbCommand):
 
 class PIQBuilder:
     @staticmethod
+    def buildHashQuery():
+        db = MysqlDb(host=db_cfg['host'], user=db_cfg['user'], passwd=db_cfg['passwd'], db=db_cfg['db'])
+
+        return PIQueryHash64(db)
+    @staticmethod
     def build():
         # print('connect to host {}'.format(db_cfg['host']))
         db = MysqlDb(host=db_cfg['host'], user=db_cfg['user'], passwd=db_cfg['passwd'], db=db_cfg['db'])
@@ -246,11 +244,19 @@ class PIQBuilder:
         img_feature = ImgFeature()
 
         return PIQuery(limit_hash_query, img_feature)
+    # @staticmethod
+    # def buildAddCmd(cid, _id, url):
+    #     db = MysqlDb(host=db_cfg['host'], user=db_cfg['user'], passwd=db_cfg['passwd'], db=db_cfg['db'])
+    #     return AddDbCommand(db=db, cid=cid, _id=_id, url=url)
+    # @staticmethod
+    # def buildDelCmd(cid, _id):
+    #     db = MysqlDb(host=db_cfg['host'], user=db_cfg['user'], passwd=db_cfg['passwd'], db=db_cfg['db'])
+    #     return DelDbCommand(db=db, cid=cid, _id=_id)
     @staticmethod
     def buildAddCmd(cid, _id, url):
         db = MysqlDb(host=db_cfg['host'], user=db_cfg['user'], passwd=db_cfg['passwd'], db=db_cfg['db'])
-        return AddDbCommand(db=db, cid=cid, _id=_id, url=url)
+        return AddHashCommand(db=db, cid=cid, _id=_id, url=url)
     @staticmethod
     def buildDelCmd(cid, _id):
         db = MysqlDb(host=db_cfg['host'], user=db_cfg['user'], passwd=db_cfg['passwd'], db=db_cfg['db'])
-        return DelDbCommand(db=db, cid=cid, _id=_id)
+        return DelHashCommand(db=db, cid=cid, _id=_id)

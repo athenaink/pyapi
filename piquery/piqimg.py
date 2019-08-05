@@ -28,7 +28,7 @@ class ImgDownloader:
         img_data = np.asarray(Image.open(BytesIO(res.content)))
         if len(img_data.shape) < 3:
             raise ImageFormatError("image format not supported!")
-        return np.asarray(Image.open(BytesIO(res.content)))
+        return img_data
 
 class ImgTransformer:
     @staticmethod
