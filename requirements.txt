@@ -6,5 +6,5 @@ xlrd==1.2.0
 pymysql==0.9.3
 Pillow==6.0.0
 flask==1.0.2
-requests==2.21.0
+requests==2.31.0
 gevent==1.4.0
